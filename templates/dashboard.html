@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ProTradeX</title>
+<style>
+body{margin:0;background:#0b1220;color:white;font-family:Arial}
+.header{background:#111827;padding:12px;display:flex;justify-content:space-between}
+.main{padding:20px}
+.alert{background:#111827;margin:10px 0;padding:12px;border-left:4px solid cyan;font-weight:bold}
+</style>
+</head>
+<body>
+
+<div class="header">
+<div>ProTradeX - {{ user }}</div>
+<a href="/logout" style="color:red">Logout</a>
+</div>
+
+<div class="main">
+<h2>Live Scanner</h2>
+<div id="alerts">Loading...</div>
+</div>
+
+<script>
+function loadScanner(){
+fetch('/live-scanner')
+.then(r=>r.json())
+.then(data=>{
+let html=""
+if(data.length===0){
+html="<div class='alert'>No Matching Stocks</div>"
+}else{
+data.forEach(x=>{
+html+=`<div class="alert"><b>${x.stock}</b> → ${x.condition}</div>`
+})
+}
+document.getElementById("alerts").innerHTML=html
+})
+}
+loadScanner()
+setInterval(loadScanner,3000)
+</script>
+
+</body>
+</html>
