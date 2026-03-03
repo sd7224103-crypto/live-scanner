@@ -1,36 +1,17 @@
 import os
 import requests
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, session, jsonify, url_for
-from functools import wraps
-
-# ===============================
-# CONFIG
-# ===============================
-
-ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev_key")
+from flask import Flask, render_template, request, redirect, session, jsonify
 
 app = Flask(__name__)
-app.secret_key = SECRET_KEY
+app.secret_key = "Anoop@12"
 
-HEADERS = {
-    "Authorization": f"Bearer {ACCESS_TOKEN}",
-    "Accept": "application/json"
-}
+# ================= CONFIG =================
 
-# ===============================
-# DEMO USERS (Multi User)
-# ===============================
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 
-USERS = {
-    "Anoop": {"password": "Anoop@12", "role": "admin"},
-    "User1": {"password": "1234", "role": "user"}
-}
-
-# ===============================
-# STOCK LIST
-# ===============================
+USERNAME = "Anoop"
+PASSWORD = "Anoop@12"
 
 STOCK_MAP = {
     "NSE_EQ|INE002A01018": "RELIANCE",
@@ -39,153 +20,143 @@ STOCK_MAP = {
     "NSE_EQ|INE009A01021": "INFY",
 }
 
-# ===============================
-# LOGIN REQUIRED DECORATOR
-# ===============================
+HEADERS = {
+    "Authorization": f"Bearer {ACCESS_TOKEN}",
+    "Accept": "application/json"
+}
 
-def login_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if "user" not in session:
-            return redirect("/login")
-        return f(*args, **kwargs)
-    return wrapper
+# ================= UTIL =================
 
-# ===============================
-# ROUTES
-# ===============================
+def get_previous_day(date):
+    day = date - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
 
-@app.route("/login", methods=["GET", "POST"])
+def market_open():
+    now = datetime.now()
+
+    if now.weekday() >= 5:
+        return False
+    if now.hour < 9 or (now.hour == 9 and now.minute < 16):
+        return False
+    if now.hour > 15 or (now.hour == 15 and now.minute > 30):
+        return False
+    return True
+
+def fetch_915(stock, date):
+    date_str = date.strftime("%Y-%m-%d")
+    url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{date_str}/{date_str}"
+
+    r = requests.get(url, headers=HEADERS, timeout=5)
+    data = r.json()
+    candles = data.get("data", {}).get("candles", [])
+
+    for candle in candles:
+        dt = datetime.fromisoformat(candle[0].replace("Z","+00:00"))
+        if dt.hour == 9 and dt.minute == 15:
+            return candle[1], candle[2], candle[3]
+
+    return None, None, None
+
+# ================= LOGIN =================
+
+@app.route("/", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        user = USERS.get(username)
-
-        if user and user["password"] == password:
-            session["user"] = username
-            session["role"] = user["role"]
-            return redirect("/")
-        else:
-            return "Invalid Credentials"
-
+        if request.form["username"] == USERNAME and request.form["password"] == PASSWORD:
+            session["user"] = USERNAME
+            return redirect("/dashboard")
     return render_template("login.html")
 
+@app.route("/dashboard")
+def dashboard():
+    if "user" not in session:
+        return redirect("/")
+    return render_template("dashboard.html", user=session["user"])
 
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect("/login")
+    return redirect("/")
 
+# ================= SCANNER =================
 
-@app.route("/")
-@login_required
-def dashboard():
-    first_stock = list(STOCK_MAP.keys())[0]
-    return render_template(
-        "dashboard.html",
-        user=session["user"],
-        role=session["role"],
-        stocks=STOCK_MAP,
-        first_stock=first_stock
-    )
+@app.route("/live-scanner")
+def live_scanner():
 
+    if "user" not in session:
+        return jsonify([])
 
-@app.route("/admin")
-@login_required
-def admin():
-    if session.get("role") != "admin":
-        return "Unauthorized"
-    return render_template("admin.html")
+    now = datetime.now()
+    prev = get_previous_day(now)
+    is_open = market_open()
 
+    results = []
 
-# ===============================
-# CHART DATA API
-# ===============================
-
-@app.route("/chart-data")
-@login_required
-def chart_data():
-
-    stock = request.args.get("stock")
-
-    if not stock:
-        return jsonify({"error": "Stock missing"})
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    prev = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    try:
-        # Try Today Intraday
-        url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{today}/{today}"
-        r = requests.get(url, headers=HEADERS, timeout=5)
-        data = r.json()
-
-        candles = data.get("data", {}).get("candles", [])
-
-        # If today empty → use previous day
-        if not candles:
-            url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{prev}/{prev}"
-            r = requests.get(url, headers=HEADERS, timeout=5)
-            data = r.json()
-            candles = data.get("data", {}).get("candles", [])
-
-        formatted = []
-
-        for c in candles:
-            dt = datetime.fromisoformat(c[0].replace("Z", "+00:00"))
-            formatted.append({
-                "time": int(dt.timestamp()),
-                "open": c[1],
-                "high": c[2],
-                "low": c[3],
-                "close": c[4]
-            })
-
-        # Fetch Previous Day High/Low
-        pdh = None
-        pdl = None
+    for stock, name in STOCK_MAP.items():
 
         try:
-            url = f"https://api.upstox.com/v2/historical-candle/{stock}/1day/{prev}/{prev}"
-            r = requests.get(url, headers=HEADERS, timeout=5)
-            data = r.json()
-            day_candle = data.get("data", {}).get("candles", [])
+            date_used = now if is_open else prev
+            o, h, l = fetch_915(stock, date_used)
 
-            if day_candle:
-                pdh = day_candle[0][2]
-                pdl = day_candle[0][3]
+            matched = False
+            reason = ""
+
+            # ===== ORB FILTER =====
+            if o is not None and not (is_open and now.hour==9 and now.minute<16):
+
+                if o == l:
+                    matched = True
+                    reason = "Open = Low (Bullish ORB)"
+
+                elif o == h:
+                    matched = True
+                    reason = "Open = High (Bearish ORB)"
+
+            # ===== PDH / PDL FILTER =====
+            if is_open:
+
+                prev_date = prev.strftime("%Y-%m-%d")
+                url = f"https://api.upstox.com/v2/historical-candle/{stock}/1day/{prev_date}/{prev_date}"
+                r = requests.get(url, headers=HEADERS, timeout=5)
+                data = r.json()
+
+                candle = data.get("data", {}).get("candles", [])
+
+                if candle:
+                    pdh = candle[0][2]
+                    pdl = candle[0][3]
+
+                    url = "https://api.upstox.com/v2/market-quote/ohlc"
+                    params = {"instrument_key": stock, "interval": "1d"}
+                    r = requests.get(url, headers=HEADERS, params=params)
+                    data = r.json()
+
+                    if "data" in data and data["data"]:
+                        key = list(data["data"].keys())[0]
+                        ltp = data["data"][key]["last_price"]
+
+                        if ltp > pdh:
+                            matched = True
+                            reason = "PDH Break"
+
+                        elif ltp < pdl:
+                            matched = True
+                            reason = "PDL Break"
+
+            if matched:
+                results.append({
+                    "stock": name,
+                    "condition": reason
+                })
 
         except:
-            pass
+            continue
 
-        return jsonify({
-            "candles": formatted,
-            "pdh": pdh,
-            "pdl": pdl
-        })
+    return jsonify(results)
 
-    except Exception as e:
-        return jsonify({
-            "candles": [],
-            "pdh": None,
-            "pdl": None
-        })
-
-
-# ===============================
-# HEALTH CHECK (UptimeRobot)
-# ===============================
-
-@app.route("/health")
-def health():
-    return "OK"
-
-
-# ===============================
-# RUN
-# ===============================
+# ================= RUN =================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=10000)
