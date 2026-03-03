@@ -19,7 +19,7 @@ align-items:center;
 .container {
 display:grid;
 grid-template-columns: 250px 1fr;
-grid-template-rows: 1fr 200px;
+grid-template-rows: auto 200px;
 height:calc(100vh - 50px);
 gap:5px;
 }
@@ -85,7 +85,7 @@ margin-left:5px;
 </div>
 
 <div class="chart-panel">
-<div id="chart" style="width:100%;height:100%;"></div>
+<div id="chart" style="width:100%;height:500px;"></div>
 </div>
 
 <div class="scanner">
@@ -105,7 +105,7 @@ const chartContainer = document.getElementById('chart');
 
 const chart = LightweightCharts.createChart(chartContainer, {
     width: chartContainer.clientWidth,
-    height: chartContainer.clientHeight,
+    height: 500,
     layout: {
         background: { color: '#0f172a' },
         textColor: '#ffffff',
