@@ -35,28 +35,50 @@ def get_previous_day(date):
         day -= timedelta(days=1)
     return day
 
-def market_open():
-    now = datetime.now()
-    if now.weekday() >= 5:
-        return False
-    if now.hour < 9 or (now.hour == 9 and now.minute < 16):
-        return False
-    if now.hour > 15 or (now.hour == 15 and now.minute > 30):
-        return False
-    return True
 
 def fetch_915(stock, date):
-    date_str = date.strftime("%Y-%m-%d")
-    url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{date_str}/{date_str}"
-    r = requests.get(url, headers=HEADERS, timeout=5)
-    data = r.json()
-    candles = data.get("data", {}).get("candles", [])
+    try:
+        date_str = date.strftime("%Y-%m-%d")
+        url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{date_str}/{date_str}"
+        r = requests.get(url, headers=HEADERS, timeout=5)
+        data = r.json()
+        candles = data.get("data", {}).get("candles", [])
 
-    for candle in candles:
-        dt = datetime.fromisoformat(candle[0].replace("Z","+00:00"))
-        if dt.hour == 9 and dt.minute == 15:
-            return candle[1], candle[2], candle[3]
+        for candle in candles:
+            dt = datetime.fromisoformat(candle[0].replace("Z","+00:00"))
+            if dt.hour == 9 and dt.minute == 15:
+                return candle[1], candle[2], candle[3]
+    except:
+        pass
+
     return None, None, None
+
+
+# ✅ TRUE MARKET DETECTION
+def market_open():
+
+    now = datetime.now()
+
+    # Weekend
+    if now.weekday() >= 5:
+        return False
+
+    # Time filter
+    if now.hour < 9 or now.hour > 15:
+        return False
+
+    try:
+        # Check today's 9:15 candle exists
+        stock = list(STOCK_MAP.keys())[0]
+        o, h, l = fetch_915(stock, now)
+
+        if o is not None:
+            return True
+    except:
+        pass
+
+    return False
+
 
 # ================= LOGIN =================
 
@@ -68,16 +90,19 @@ def login():
             return redirect("/dashboard")
     return render_template("login.html")
 
+
 @app.route("/dashboard")
 def dashboard():
     if "user" not in session:
         return redirect("/")
     return render_template("dashboard.html", user=session["user"])
 
+
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
+
 
 # ================= NIFTY STRIP =================
 
@@ -86,18 +111,20 @@ def nifty():
     try:
         url = "https://api.upstox.com/v2/market-quote/ohlc"
         params = {"instrument_key": NIFTY_KEY, "interval": "1d"}
-        r = requests.get(url, headers=HEADERS, params=params)
+
+        r = requests.get(url, headers=HEADERS, params=params, timeout=5)
         data = r.json()
 
         key = list(data["data"].keys())[0]
         ltp = data["data"][key]["last_price"]
         prev_close = data["data"][key]["ohlc"]["close"]
 
-        change = round(((ltp-prev_close)/prev_close)*100,2)
+        change = round(((ltp - prev_close) / prev_close) * 100, 2)
 
         return jsonify({"ltp": ltp, "change": change})
     except:
         return jsonify({"ltp": "-", "change": 0})
+
 
 # ================= SCANNER =================
 
@@ -111,6 +138,7 @@ def live_scanner():
     prev = get_previous_day(now)
     is_open = market_open()
 
+    # If closed → use previous day
     date_used = now if is_open else prev
 
     results = []
@@ -118,19 +146,23 @@ def live_scanner():
     for stock, name in STOCK_MAP.items():
 
         try:
-            o,h,l = fetch_915(stock, date_used)
+            o, h, l = fetch_915(stock, date_used)
 
-            if o:
+            # ===== ORB =====
+            if o is not None:
                 if o == l:
                     results.append({"stock": name, "condition": "Open = Low"})
                 elif o == h:
                     results.append({"stock": name, "condition": "Open = High"})
 
+            # ===== PDH/PDL (Only when market open) =====
             if is_open:
+
                 prev_date = prev.strftime("%Y-%m-%d")
                 url = f"https://api.upstox.com/v2/historical-candle/{stock}/1day/{prev_date}/{prev_date}"
-                r = requests.get(url, headers=HEADERS)
+                r = requests.get(url, headers=HEADERS, timeout=5)
                 data = r.json()
+
                 candle = data.get("data", {}).get("candles", [])
 
                 if candle:
@@ -139,7 +171,8 @@ def live_scanner():
 
                     url = "https://api.upstox.com/v2/market-quote/ohlc"
                     params = {"instrument_key": stock, "interval": "1d"}
-                    r = requests.get(url, headers=HEADERS, params=params)
+
+                    r = requests.get(url, headers=HEADERS, params=params, timeout=5)
                     data = r.json()
 
                     key = list(data["data"].keys())[0]
@@ -158,6 +191,7 @@ def live_scanner():
         "date": date_used.strftime("%Y-%m-%d"),
         "data": results
     })
+
 
 # ================= RUN =================
 
