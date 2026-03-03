@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Trading Terminal</title>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+body { margin:0; background:#0b1220; color:white; font-family:Arial; }
+
+.header {
+background:#111827;
+padding:10px 20px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+}
+
+.container {
+display:grid;
+grid-template-columns: 250px 1fr;
+grid-template-rows: 1fr 200px;
+height:calc(100vh - 50px);
+gap:5px;
+}
+
+.watchlist {
+background:#111827;
+padding:10px;
+overflow:auto;
+}
+
+.stock {
+padding:8px;
+cursor:pointer;
+border-bottom:1px solid #1e293b;
+}
+.stock:hover { background:#1f2937; }
+
+.chart-panel {
+background:#0f172a;
+padding:10px;
+}
+
+.scanner {
+grid-column:2/3;
+background:#111827;
+padding:10px;
+overflow:auto;
+}
+
+button {
+background:#00ffff;
+border:none;
+padding:5px 10px;
+cursor:pointer;
+margin-left:5px;
+}
+
+</style>
+</head>
+<body>
+
+<div class="header">
+<div>📊 Trading Terminal - {{ user }}</div>
+<div>
+<button onclick="toggleLevels()">PDH/PDL</button>
+<button onclick="toggleRefresh()">Auto</button>
+{% if role == "admin" %}
+<a href="/admin" style="color:orange;">Admin</a>
+{% endif %}
+<a href="/logout" style="color:red;margin-left:10px;">Logout</a>
+</div>
+</div>
+
+<div class="container">
+
+<div class="watchlist">
+<h3>Watchlist</h3>
+{% for key,value in stocks.items() %}
+<div class="stock" onclick="selectStock('{{ key }}')">
+{{ value }}
+</div>
+{% endfor %}
+</div>
+
+<div class="chart-panel">
+<div id="chart" style="height:100%;"></div>
+</div>
+
+<div class="scanner">
+<h3>📈 Scanner Alerts</h3>
+<div id="alerts">Loading...</div>
+</div>
+
+</div>
+
+<script>
+
+let currentStock = "{{ list(stocks.keys())[0] }}";
+let refreshEnabled = true;
+let levelEnabled = true;
+
+const chart = LightweightCharts.createChart(
+document.getElementById('chart'),
+{ layout:{ backgroundColor:'#0f172a', textColor:'#fff' } }
+);
+
+const candleSeries = chart.addCandlestickSeries();
+let pdhLine=null;
+let pdlLine=null;
+
+function selectStock(stock){
+currentStock=stock;
+loadChart();
+}
+
+function flash(color){
+document.body.style.backgroundColor=color;
+setTimeout(()=>{document.body.style.backgroundColor="#0b1220";},300);
+}
+
+function loadChart(){
+fetch(`/chart-data?stock=${currentStock}`)
+.then(r=>r.json())
+.then(data=>{
+candleSeries.setData(data.candles);
+
+if(levelEnabled && data.pdh && data.pdl){
+if(pdhLine) candleSeries.removePriceLine(pdhLine);
+if(pdlLine) candleSeries.removePriceLine(pdlLine);
+
+pdhLine=candleSeries.createPriceLine({
+price:data.pdh,color:'red',lineWidth:2,title:'PDH'
+});
+pdlLine=candleSeries.createPriceLine({
+price:data.pdl,color:'green',lineWidth:2,title:'PDL'
+});
+
+let last=data.candles[data.candles.length-1];
+if(last){
+if(last.close>=data.pdh) flash("#3b0000");
+if(last.close<=data.pdl) flash("#003b00");
+}
+}
+});
+}
+
+function loadScanner(){
+fetch('/orb-scanner')
+.then(r=>r.json())
+.then(data=>{
+document.getElementById("alerts").innerHTML =
+data.length?data.join("<br>"):"No ORB Signals";
+});
+
+fetch('/pdh-scanner')
+.then(r=>r.json())
+.then(data=>{
+document.getElementById("alerts").innerHTML += "<br><br>"+
+(data.length?data.join("<br>"):"");
+});
+}
+
+function toggleRefresh(){ refreshEnabled=!refreshEnabled; }
+function toggleLevels(){ levelEnabled=!levelEnabled; loadChart(); }
+
+loadChart();
+loadScanner();
+
+setInterval(()=>{
+if(refreshEnabled){
+loadChart();
+loadScanner();
+}
+},10000);
+
+</script>
+
+</body>
+</html>
