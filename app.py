@@ -20,6 +20,8 @@ STOCK_MAP = {
     "NSE_EQ|INE009A01021": "INFY",
 }
 
+NIFTY_KEY = "NSE_INDEX|Nifty 50"
+
 HEADERS = {
     "Authorization": f"Bearer {ACCESS_TOKEN}",
     "Accept": "application/json"
@@ -35,7 +37,6 @@ def get_previous_day(date):
 
 def market_open():
     now = datetime.now()
-
     if now.weekday() >= 5:
         return False
     if now.hour < 9 or (now.hour == 9 and now.minute < 16):
@@ -47,7 +48,6 @@ def market_open():
 def fetch_915(stock, date):
     date_str = date.strftime("%Y-%m-%d")
     url = f"https://api.upstox.com/v2/historical-candle/{stock}/1minute/{date_str}/{date_str}"
-
     r = requests.get(url, headers=HEADERS, timeout=5)
     data = r.json()
     candles = data.get("data", {}).get("candles", [])
@@ -56,7 +56,6 @@ def fetch_915(stock, date):
         dt = datetime.fromisoformat(candle[0].replace("Z","+00:00"))
         if dt.hour == 9 and dt.minute == 15:
             return candle[1], candle[2], candle[3]
-
     return None, None, None
 
 # ================= LOGIN =================
@@ -80,48 +79,58 @@ def logout():
     session.clear()
     return redirect("/")
 
+# ================= NIFTY STRIP =================
+
+@app.route("/nifty")
+def nifty():
+    try:
+        url = "https://api.upstox.com/v2/market-quote/ohlc"
+        params = {"instrument_key": NIFTY_KEY, "interval": "1d"}
+        r = requests.get(url, headers=HEADERS, params=params)
+        data = r.json()
+
+        key = list(data["data"].keys())[0]
+        ltp = data["data"][key]["last_price"]
+        prev_close = data["data"][key]["ohlc"]["close"]
+
+        change = round(((ltp-prev_close)/prev_close)*100,2)
+
+        return jsonify({"ltp": ltp, "change": change})
+    except:
+        return jsonify({"ltp": "-", "change": 0})
+
 # ================= SCANNER =================
 
 @app.route("/live-scanner")
 def live_scanner():
 
     if "user" not in session:
-        return jsonify([])
+        return jsonify({})
 
     now = datetime.now()
     prev = get_previous_day(now)
     is_open = market_open()
+
+    date_used = now if is_open else prev
 
     results = []
 
     for stock, name in STOCK_MAP.items():
 
         try:
-            date_used = now if is_open else prev
-            o, h, l = fetch_915(stock, date_used)
+            o,h,l = fetch_915(stock, date_used)
 
-            matched = False
-            reason = ""
-
-            # ===== ORB FILTER =====
-            if o is not None and not (is_open and now.hour==9 and now.minute<16):
-
+            if o:
                 if o == l:
-                    matched = True
-                    reason = "Open = Low (Bullish ORB)"
-
+                    results.append({"stock": name, "condition": "Open = Low"})
                 elif o == h:
-                    matched = True
-                    reason = "Open = High (Bearish ORB)"
+                    results.append({"stock": name, "condition": "Open = High"})
 
-            # ===== PDH / PDL FILTER =====
             if is_open:
-
                 prev_date = prev.strftime("%Y-%m-%d")
                 url = f"https://api.upstox.com/v2/historical-candle/{stock}/1day/{prev_date}/{prev_date}"
-                r = requests.get(url, headers=HEADERS, timeout=5)
+                r = requests.get(url, headers=HEADERS)
                 data = r.json()
-
                 candle = data.get("data", {}).get("candles", [])
 
                 if candle:
@@ -133,28 +142,22 @@ def live_scanner():
                     r = requests.get(url, headers=HEADERS, params=params)
                     data = r.json()
 
-                    if "data" in data and data["data"]:
-                        key = list(data["data"].keys())[0]
-                        ltp = data["data"][key]["last_price"]
+                    key = list(data["data"].keys())[0]
+                    ltp = data["data"][key]["last_price"]
 
-                        if ltp > pdh:
-                            matched = True
-                            reason = "PDH Break"
-
-                        elif ltp < pdl:
-                            matched = True
-                            reason = "PDL Break"
-
-            if matched:
-                results.append({
-                    "stock": name,
-                    "condition": reason
-                })
+                    if ltp > pdh:
+                        results.append({"stock": name, "condition": "PDH Break"})
+                    elif ltp < pdl:
+                        results.append({"stock": name, "condition": "PDL Break"})
 
         except:
             continue
 
-    return jsonify(results)
+    return jsonify({
+        "market_open": is_open,
+        "date": date_used.strftime("%Y-%m-%d"),
+        "data": results
+    })
 
 # ================= RUN =================
 
