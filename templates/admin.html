@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Admin Panel</title>
+<style>
+body { background:#0b1220; color:white; font-family:Arial; text-align:center; }
+.card {
+background:#111827;
+margin:50px auto;
+padding:20px;
+width:400px;
+border-radius:10px;
+box-shadow:0 0 20px red;
+}
+a { color:#00ffff; }
+</style>
+</head>
+<body>
+
+<div class="card">
+<h2>🛡 Admin Panel</h2>
+<h4>Registered Users</h4>
+
+{% for user in users %}
+<p>{{ user }} ({{ users[user]["role"] }})</p>
+{% endfor %}
+
+<br>
+<a href="/">Back to Dashboard</a>
+</div>
+
+</body>
+</html>
