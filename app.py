@@ -63,13 +63,14 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
+    first_stock = list(STOCK_MAP.keys())[0]
     return render_template(
         "dashboard.html",
         user=session["user"],
         role=session["role"],
-        stocks=STOCK_MAP
+        stocks=STOCK_MAP,
+        first_stock=first_stock
     )
-
 # ================= ORB SCANNER LOGIC =================
 
 def get_previous_day(date):
