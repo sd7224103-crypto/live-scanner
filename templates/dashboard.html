@@ -2,9 +2,14 @@
 <html>
 <head>
 <title>ProTradeX</title>
+
 <style>
 body{margin:0;background:#0b1220;color:white;font-family:Arial}
-.header{background:#111827;padding:12px;display:flex;justify-content:space-between}
+.header{background:#111827;padding:12px;display:flex;justify-content:space-between;align-items:center}
+.badge{padding:6px 12px;border-radius:20px;font-weight:bold}
+.green{background:#064e3b;color:#00ff88}
+.red{background:#4b0000;color:#ff4d4d}
+.nifty{margin-left:20px;font-weight:bold}
 .main{padding:20px}
 .alert{background:#111827;margin:10px 0;padding:12px;border-left:4px solid cyan;font-weight:bold}
 </style>
@@ -12,7 +17,11 @@ body{margin:0;background:#0b1220;color:white;font-family:Arial}
 <body>
 
 <div class="header">
-<div>ProTradeX - {{ user }}</div>
+<div>
+ProTradeX - {{ user }}
+<span id="marketStatus" class="badge"></span>
+<span id="niftyStrip" class="nifty"></span>
+</div>
 <a href="/logout" style="color:red">Logout</a>
 </div>
 
@@ -22,23 +31,55 @@ body{margin:0;background:#0b1220;color:white;font-family:Arial}
 </div>
 
 <script>
+
 function loadScanner(){
 fetch('/live-scanner')
 .then(r=>r.json())
-.then(data=>{
+.then(res=>{
+
 let html=""
-if(data.length===0){
-html="<div class='alert'>No Matching Stocks</div>"
+
+if(!res.market_open){
+document.getElementById("marketStatus").innerHTML="🔴 Market Closed"
+document.getElementById("marketStatus").className="badge red"
+html+=`<div class="alert">Showing Previous Trading Day: ${res.date}</div>`
+}
+else{
+document.getElementById("marketStatus").innerHTML="🟢 Market Open"
+document.getElementById("marketStatus").className="badge green"
+}
+
+if(res.data.length===0){
+html+="<div class='alert'>No Matching Stocks</div>"
 }else{
-data.forEach(x=>{
+res.data.forEach(x=>{
 html+=`<div class="alert"><b>${x.stock}</b> → ${x.condition}</div>`
 })
 }
+
 document.getElementById("alerts").innerHTML=html
 })
 }
+
+function loadNifty(){
+fetch('/nifty')
+.then(r=>r.json())
+.then(data=>{
+let color = data.change>=0 ? "#00ff88" : "#ff4d4d"
+document.getElementById("niftyStrip").innerHTML =
+`NIFTY 50: ${data.ltp} (${data.change}%)`
+document.getElementById("niftyStrip").style.color=color
+})
+}
+
 loadScanner()
-setInterval(loadScanner,3000)
+loadNifty()
+
+setInterval(()=>{
+loadScanner()
+loadNifty()
+},3000)
+
 </script>
 
 </body>
